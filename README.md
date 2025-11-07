@@ -87,16 +87,37 @@ funding_interval_arb/
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+```bash
+# Install required packages
+pip install pandas numpy aiohttp matplotlib requests pyarrow
+
+# Navigate to project directory
+cd /home/james/research/funding_interval_arb
+```
+
 ### Step 1: Analyze Opportunities
 
 Identify funding interval mismatches:
 
 ```bash
-cd opportunity_analysis
+# Navigate to analysis module
+cd /home/james/research/funding_interval_arb/opportunity_analysis
+
+# Run analysis (example: last 90 days ending 2025-11-05)
 python main.py --end_date 2025-11-05 --duration 90
+
+# Or use the shell script
+bash run_analysis.sh
 ```
 
-Generates: `funding_rate_timeline_*.csv` files
+**Output**: `funding_rate_timeline_*.csv` files in `/tmp/funding_cache/`
+
+**Command Options**:
+- `--end_date YYYY-MM-DD` - End date for analysis (default: today)
+- `--duration DAYS` - Number of days to analyze (default: 90)
+- `--symbols SYMBOL1,SYMBOL2` - Specific symbols (optional)
 
 ### Step 2: Configure Backtest
 
@@ -111,11 +132,22 @@ Edit `backtest/config/default_backtest_config.json`:
   },
   "trading": {
     "initial_capital": 100000,
-    "vwap_window_minutes": 5
+    "vwap_window_minutes": 5,
   },
   "fees": {
     "maker_fee": 0.0002,
     "taker_fee": 0.0004
+  },
+  "symbols": {
+    "include_all": true,
+    "symbol_whitelist": [],
+    "exclude_symbols": []
+  },
+  "output": {
+    "output_dir": "/home/james/research_output/funding_interval_arb/backtest_results",
+    "save_detailed_trades": true,
+    "save_equity_curve": true,
+    "generate_plots": true
   }
 }
 ```
@@ -123,21 +155,39 @@ Edit `backtest/config/default_backtest_config.json`:
 ### Step 3: Run Backtest
 
 ```bash
-cd backtest
+# Navigate to backtest module
+cd /home/james/research/funding_interval_arb/backtest
+
+# Run backtest with default config
 python run_backtest.py
+
+# Or specify custom config
+python run_backtest.py --config /path/to/custom_config.json
 ```
+
+**Execution Time**: 
+- First run: ~5-10 seconds (with K-line caching)
+- Subsequent runs: ~5-8 seconds (uses cached data)
 
 ### Step 4: View Results
 
 Check results in: `/home/james/research_output/funding_interval_arb/backtest_results/`
 
 ```
-backtest_results/BACKTEST_YYYYMMDD_HHMMSS/
-├── trades.csv                  # Detailed trades
+backtest_results/YYYYMMDD_HHMMSS/
+├── backtest_report.txt         # Performance summary
+├── trades.csv                  # Detailed trade records
 ├── equity_curve.csv            # Equity progression
-├── performance_report.txt      # Metrics and analysis
-├── symbol_stats.csv            # Per-symbol breakdown
-└── pnl_chart.png               # P&L and drawdown chart
+└── pnl_chart.png               # P&L and drawdown visualization
+```
+
+**View Report**:
+```bash
+# View performance report
+cat /home/james/research_output/funding_interval_arb/backtest_results/latest/backtest_report.txt
+
+# View trades
+head -20 /home/james/research_output/funding_interval_arb/backtest_results/latest/trades.csv
 ```
 
 ## 💹 How It Works
@@ -285,6 +335,92 @@ START
 - Equity curve tracking
 - Performance metrics and visualizations
 
+## 🔍 Command Reference
+
+### Analysis Commands
+
+```bash
+# Basic analysis (last 90 days)
+cd /home/james/research/funding_interval_arb/opportunity_analysis
+python main.py --end_date 2025-11-05 --duration 90
+
+# Custom date range
+python main.py --start_date 2025-08-01 --end_date 2025-11-05
+
+# Specific symbols only
+python main.py --symbols BTCUSDT,ETHUSDT,BNBUSDT --duration 30
+
+# Use shell script (with default settings)
+bash run_analysis.sh
+```
+
+### Backtest Commands
+
+```bash
+# Run with default config
+cd /home/james/research/funding_interval_arb/backtest
+python run_backtest.py
+
+# Run with custom config
+python run_backtest.py --config /path/to/config.json
+
+# Run with specific date range (edit config first)
+# Edit: backtest/config/default_backtest_config.json
+python run_backtest.py
+```
+
+### View Results Commands
+
+```bash
+# Find latest backtest results
+cd /home/james/research_output/funding_interval_arb/backtest_results
+ls -lt | head -5
+
+# View performance report
+cat $(ls -t */backtest_report.txt | head -1)
+
+# View trades (first 20)
+head -20 $(ls -t */trades.csv | head -1)
+
+# View equity curve
+head -20 $(ls -t */equity_curve.csv | head -1)
+
+# Open P&L chart (if on desktop)
+xdg-open $(ls -t */pnl_chart.png | head -1)
+```
+
+### Cache Management
+
+```bash
+# View K-line cache
+ls -lh /tmp/kline_cache/ | head -20
+
+# Check cache size
+du -sh /tmp/kline_cache/
+
+# Clear K-line cache (force re-download)
+rm -rf /tmp/kline_cache/*.parquet
+
+# View funding rate cache
+ls -lh /tmp/funding_cache/ | head -20
+
+# Clear funding cache
+rm -rf /tmp/funding_cache/*.csv
+```
+
+### Data Inspection
+
+```bash
+# Count opportunities
+wc -l /tmp/funding_cache/funding_rate_timeline_*.csv
+
+# Check specific symbol opportunities
+grep "BTCUSDT" /tmp/funding_cache/funding_rate_timeline_BTCUSDT.csv | head -10
+
+# View backtest trades for specific symbol
+grep "ETHUSDT" /home/james/research_output/funding_interval_arb/backtest_results/latest/trades.csv
+```
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -350,6 +486,77 @@ For higher return targeting:
   "exit_buffer_pct": 0.0001,
   "taker_fee": 0.0003
 }
+```
+
+## 🎬 Complete End-to-End Example
+
+### Full Workflow from Scratch
+
+```bash
+# 1. Navigate to project root
+cd /home/james/research/funding_interval_arb
+
+# 2. Run opportunity analysis (90 days)
+cd opportunity_analysis
+python main.py --end_date 2025-11-05 --duration 90
+
+# Expected output:
+# - Analysis complete
+# - 468 symbols analyzed
+# - 1015 tradable opportunities found
+# - Files saved to /tmp/funding_cache/
+
+# 3. Run backtest
+cd ../backtest
+python run_backtest.py
+
+# Expected output:
+# - K-line data fetched (first run: ~10 sec)
+# - VWAP calculated
+# - Trades executed
+# - Reports generated
+
+# 4. View results
+cd /home/james/research_output/funding_interval_arb/backtest_results
+ls -lt | head -5  # Find latest run
+
+# 5. Check performance
+cat $(ls -t */backtest_report.txt | head -1)
+```
+
+### Quick Test Run (Subset of Symbols)
+
+For faster testing with limited symbols:
+
+```bash
+# 1. Edit config to include only specific symbols
+cd /home/james/research/funding_interval_arb/backtest/config
+cat > test_config.json << 'EOF'
+{
+  "analysis": {
+    "run_analysis_first": false,
+    "start_date": "2025-10-01",
+    "end_date": "2025-11-05"
+  },
+  "trading": {
+    "initial_capital": 100000,
+    "vwap_window_minutes": 5
+  },
+  "fees": {
+    "maker_fee": 0.0002,
+    "taker_fee": 0.0004
+  },
+  "symbols": {
+    "include_all": false,
+    "symbol_whitelist": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
+    "exclude_symbols": []
+  }
+}
+EOF
+
+# 2. Run backtest with test config
+cd ..
+python run_backtest.py --config config/test_config.json
 ```
 
 ## 📈 Understanding Results
