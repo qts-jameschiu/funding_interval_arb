@@ -744,14 +744,24 @@ class KlineFetcher:
             # 整理結果
             klines_dict = {}
             success_count = 0
+            none_count = 0
+            error_count = 0
             
-            for result in results:
-                if result is None or len(result) != 3:
+            for i, result in enumerate(results):
+                if result is None:
+                    none_count += 1
+                    continue
+                
+                if len(result) != 3:
+                    logger.warning(f"結果 {i}: 長度不對 {len(result)}")
+                    error_count += 1
                     continue
                 
                 symbol, exchange, df = result
                 
-                if df is not None:
+                if df is None:
+                    none_count += 1
+                else:
                     if symbol not in klines_dict:
                         klines_dict[symbol] = {}
                     klines_dict[symbol][exchange] = df
@@ -760,7 +770,14 @@ class KlineFetcher:
             elapsed = time.time() - start_time
             print(f"\n✅ 完成")
             print(f"   成功: {success_count}/{total_tasks}")
+            print(f"   無數據 (None): {none_count}")
+            print(f"   錯誤: {error_count}")
             print(f"   耗時: {elapsed:.1f} 秒 ({total_tasks/elapsed:.1f} tasks/sec)")
             print("="*80 + "\n")
+            
+            if not klines_dict:
+                logger.warning("⚠️ 警告: klines_dict 為空，沒有 K-line 數據被加載")
+            else:
+                logger.info(f"✓ 加載完成: {len(klines_dict)} 個 symbols，{success_count} 個數據集")
             
             return klines_dict

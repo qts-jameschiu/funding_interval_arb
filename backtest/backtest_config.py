@@ -36,7 +36,7 @@ class BacktestConfig:
             "exclude_symbols": []
         },
         "output": {
-            "output_dir": "/home/james/research_output/funding_interval_arb/backtest_results",
+            "output_dir": f"/home/james/research_output/funding_interval_arb/backtest_results/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "save_detailed_trades": True,
             "save_equity_curve": True,
             "generate_plots": True
@@ -103,6 +103,11 @@ class BacktestConfig:
                 config_dict = json.load(f)
         except json.JSONDecodeError as e:
             raise json.JSONDecodeError(f"設定檔案 JSON 格式錯誤: {e}", e.doc, e.pos)
+        
+        # Add timestamp to output directory
+        if "output" in config_dict and "output_dir" in config_dict["output"]:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            config_dict["output"]["output_dir"] = f"{config_dict['output']['output_dir']}/{timestamp}"
         
         return cls(config_dict)
     

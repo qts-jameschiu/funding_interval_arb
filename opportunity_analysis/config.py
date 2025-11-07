@@ -1,6 +1,7 @@
 """Configuration for funding interval arbitrage research."""
 import os
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,12 +24,16 @@ VALID_INTERVALS = [3600, 14400, 28800]  # 1h, 4h, 8h
 # Mismatch threshold (seconds)
 MISMATCH_THRESHOLD = 3600  # 1 hour difference
 
-# Output Directory
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/home/james/research_output/funding_interval_arb/existence_analysis"))
+# Generate timestamp for output directory
+TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# Output Directory with timestamp
+BASE_OUTPUT_DIR = Path(os.getenv("BASE_OUTPUT_DIR", "/home/james/research_output/funding_interval_arb/existence_analysis"))
+OUTPUT_DIR = BASE_OUTPUT_DIR / TIMESTAMP
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Data Directory
-DATA_DIR = OUTPUT_DIR / "data"
+# Data Directory (funding timeline cache)
+DATA_DIR = Path(os.getenv("DATA_DIR", "/tmp/funding_cache"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Plots Directory

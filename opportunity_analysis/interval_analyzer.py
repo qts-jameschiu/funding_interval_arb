@@ -306,9 +306,20 @@ class IntervalAnalyzer:
         
         # Calculate expected number of records
         time_range = (end_time - start_time) / 1000  # in seconds
-        expected_records = int(time_range / expected_interval)
         actual_records = len(funding_data)
-        completeness = actual_records / expected_records if expected_records > 0 else 0
+        
+        # For very small time ranges (< 1 interval), calculate completeness differently
+        # to avoid unrealistic percentages
+        if time_range < expected_interval:
+            # Small time range - just check if we have at least 1 record
+            completeness = 1.0 if actual_records > 0 else 0.0
+            expected_records = 1
+        else:
+            expected_records = int(time_range / expected_interval)
+            completeness = actual_records / expected_records if expected_records > 0 else 0
+        
+        # Cap completeness at 100% for practical purposes (avoid showing 799%)
+        completeness = min(completeness, 1.0)
         
         # Check for large time gaps
         for i in range(1, len(funding_data)):

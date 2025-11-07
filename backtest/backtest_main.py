@@ -105,7 +105,7 @@ def check_time_coverage(config: BacktestConfig, logger: logging.Logger) -> bool:
     from pathlib import Path
     
     # 查找既有分析資料
-    output_base = Path("/home/james/research_output/funding_interval_arb/existence_analysis/data")
+    output_base = Path("/tmp/funding_cache")
     
     if not output_base.exists():
         logger.warning(f"分析資料目錄不存在: {output_base}")

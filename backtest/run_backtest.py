@@ -150,6 +150,23 @@ def run_complete_backtest(config: BacktestConfig, logger: logging.Logger):
         if tradable_symbols:
             klines_dict = asyncio.run(fetcher.fetch_all_klines(tradable_symbols, config))
             logger.info(f"✓ 已獲取 K 線資料")
+            
+            # 詳細診斷
+            if not klines_dict:
+                logger.error("❌ klines_dict 為空！K-line 數據未被加載")
+                logger.error(f"   tradable_symbols 數: {len(tradable_symbols)}")
+                logger.error(f"   快取目錄: {fetcher.cache_dir}")
+            else:
+                logger.info(f"✓ klines_dict 包含 {len(klines_dict)} 個 symbols")
+                # 查看每個 symbol 的數據
+                for symbol in list(klines_dict.keys())[:5]:
+                    exchanges = klines_dict[symbol]
+                    logger.info(f"  {symbol}: {len(exchanges)} 個交易所")
+                    for exchange, df in exchanges.items():
+                        if df is not None:
+                            logger.info(f"    {exchange}: {len(df)} 行")
+                        else:
+                            logger.warning(f"    {exchange}: None")
         else:
             logger.warning("無可交易的 symbols，跳過 K 線獲取")
             klines_dict = {}

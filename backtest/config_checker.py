@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ConfigChecker:
     """設定檢查器"""
     
-    def __init__(self, data_dir: str = "/home/james/research_output/funding_interval_arb/existence_analysis/data"):
+    def __init__(self, data_dir: str = "/tmp/funding_cache"):
         """
         初始化檢查器
         

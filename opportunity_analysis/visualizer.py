@@ -776,15 +776,25 @@ class Visualizer:
                 tradable_rows = funding_timeline[funding_timeline['tradable'] == True]
                 
                 if not tradable_rows.empty:
-                    # Calculate average of absolute funding rates (in basis points)
-                    # Take the average of the higher funding rate between binance and bybit
-                    max_rates = []
+                    # Calculate average cost of funding (the funding we need to pay)
+                    # If binance_pay=False: we RECEIVE from Binance (use bybit's cost)
+                    # If binance_pay=True: we PAY to Binance (use binance's cost)
+                    funding_costs = []
                     for _, row in tradable_rows.iterrows():
                         bn_rate_bp = abs(row['binance_rate']) * 10000 if row['binance_rate'] else 0
                         by_rate_bp = abs(row['bybit_rate']) * 10000 if row['bybit_rate'] else 0
-                        max_rates.append(max(bn_rate_bp, by_rate_bp))
+                        
+                        # Determine which funding rate represents our cost
+                        # If binance_pay is False, we're receiving from Binance, so cost is Bybit's
+                        # If bybit_pay is True, we're paying to Bybit, so cost is Bybit's
+                        if not row.get('binance_pay', False) or row.get('bybit_pay', False):
+                            # We pay to Bybit (or receive from Binance)
+                            funding_costs.append(by_rate_bp)
+                        else:
+                            # We pay to Binance
+                            funding_costs.append(bn_rate_bp)
                     
-                    avg_funding = sum(max_rates) / len(max_rates) if max_rates else 0
+                    avg_funding = sum(funding_costs) / len(funding_costs) if funding_costs else 0
                     tradable_funding_by_symbol[symbol] = avg_funding
         
         if not tradable_funding_by_symbol:

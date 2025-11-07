@@ -388,161 +388,194 @@ async def load_or_fetch_funding_data(
     else:
         if cached_df is not None and not cached_df.empty:
             try:
-                start_time_tolerance_ms = 1 * 24 * 60 * 60 * 1000  # 1 day tolerance
-                end_time_tolerance_ms = 1 * 24 * 60 * 60 * 1000  # 1 day tolerance
+                # Calculate requested time range
+                requested_duration_ms = end_time - start_time
                 
-                # Check if cache covers the requested range (with tolerance)
-                cache_covers_range = (cached_start <= (start_time + start_time_tolerance_ms) and 
-                                     cached_end >= (end_time - end_time_tolerance_ms))
-                
-                if cache_covers_range:
-                    logger.info(f"[Cache] {symbol}: using cached data (covers requested range)")
-                    # Convert cached timeline back to data format
-                    bn_data = []
-                    by_data = []
-                    
-                    for _, row in cached_df.iterrows():
-                        dt_str = row['datetime']
-                        funding_time_ms = int(pd.to_datetime(dt_str).timestamp() * 1000)
+                # For small time ranges (< 1 day), be lenient with cache - use it if it overlaps
+                if requested_duration_ms < 1 * 24 * 60 * 60 * 1000:
+                    # Small time range: use cache if it has any overlap
+                    cache_has_overlap = (cached_start <= end_time and cached_end >= start_time)
+                    if cache_has_overlap:
+                        logger.info(f"[Cache] {symbol}: small time range, using cached data")
+                        # Convert cached timeline back to data format
+                        bn_data = []
+                        by_data = []
                         
-                        bn_data.append({
-                            'fundingTime': funding_time_ms,
-                            'fundingRate': row['binance_rate'],
-                            'interval': row['binance_interval'] * 3600,
-                            'interval_hours': row['binance_interval'],
-                            'datetime': dt_str
-                        })
-                        by_data.append({
-                            'fundingTime': funding_time_ms,
-                            'fundingRate': row['bybit_rate'],
-                            'interval': row['bybit_interval'] * 3600,
-                            'interval_hours': row['bybit_interval'],
-                            'datetime': dt_str
-                        })
-                    
-                    return bn_data, by_data
-                
-                # Cache exists but doesn't cover full range - fetch missing periods
-                else:
-                    logger.info(f"[Cache] {symbol}: cache exists but doesn't cover full range, fetching missing periods...")
-                    
-                    # Get symbol mappings for both exchanges
-                    bn_symbol = symbol_mapping.get(symbol, {}).get('binance', symbol)
-                    by_symbol = symbol_mapping.get(symbol, {}).get('bybit', symbol)
-                    
-                    # Use pre-fetched listing times (Ticket #8 optimization: avoid redundant API calls)
-                    bn_listing_time_ms = None
-                    by_listing_time_ms = None
-                    
-                    if listing_times and symbol in listing_times:
-                        bn_listing_time_ms = listing_times[symbol].get('binance')
-                        by_listing_time_ms = listing_times[symbol].get('bybit')
-                        
-                        if bn_listing_time_ms:
-                            bn_dt = datetime.fromtimestamp(bn_listing_time_ms / 1000)
-                            logger.debug(f"[Cache] {symbol}: Binance listing time (cached): {bn_dt}")
-                        
-                        if by_listing_time_ms:
-                            by_dt = datetime.fromtimestamp(by_listing_time_ms / 1000)
-                            logger.debug(f"[Cache] {symbol}: Bybit listing time (cached): {by_dt}")
-                    else:
-                        logger.debug(f"[Cache] {symbol}: listing times not pre-fetched, skipping listing time check")
-                    
-                    fetch_periods = []
-                    
-                    # Gap before cache
-                    if start_time < cached_start:
-                        gap_before_days = (cached_start - start_time) / (24 * 60 * 60 * 1000)
-                        
-                        # Get max listing time for both exchanges
-                        max_listing_time = None
-                        if bn_listing_time_ms and by_listing_time_ms:
-                            max_listing_time = max(bn_listing_time_ms, by_listing_time_ms)
-                        
-                        # Logic:
-                        # 1. If gap_end (cached_start) < max(listing_times) → don't fetch (no data before listing)
-                        # 2. If gap_start (start_time) < max(listing_times) → fetch from max(listing_times)
-                        # 3. Otherwise → fetch from gap_start
-                        
-                        if max_listing_time and cached_start < max_listing_time:
-                            # Gap ends before listing time - no data available
-                            logger.info(f"[Cache] {symbol}: gap before cache ends before listing time ({datetime.fromtimestamp(max_listing_time/1000).strftime('%Y-%m-%d')}), SKIPPING fetch")
-                        else:
-                            # Determine fetch start
-                            fetch_gap_start = start_time
-                            if max_listing_time and start_time < max_listing_time:
-                                fetch_gap_start = max_listing_time
-                                logger.info(f"[Cache] {symbol}: gap start before listing time, adjusted fetch start from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(fetch_gap_start/1000).strftime('%Y-%m-%d')}")
+                        for _, row in cached_df.iterrows():
+                            dt_str = row['datetime']
+                            funding_time_ms = int(pd.to_datetime(dt_str).timestamp() * 1000)
                             
-                            logger.info(f"[Cache] {symbol}: gap before cache ({gap_before_days:.1f} days), fetching from {datetime.fromtimestamp(fetch_gap_start/1000).strftime('%Y-%m-%d')}...")
-                            fetch_periods.append((fetch_gap_start, cached_start, "before"))
-                    
-                    # Gap after cache - always fetch
-                    if end_time > cached_end:
-                        gap_after_days = (end_time - cached_end) / (24 * 60 * 60 * 1000)
-                        logger.info(f"[Cache] {symbol}: gap after cache ({gap_after_days:.1f} days), fetching...")
-                        fetch_periods.append((cached_end, end_time, "after"))
-                    
-                    # Fetch missing periods
-                    all_bn_data = []
-                    all_by_data = []
-                    
-                    for period_start, period_end, period_type in fetch_periods:
-                        logger.info(f"[Fetch] {symbol}: fetching {period_type} period ({datetime.fromtimestamp(period_start/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(period_end/1000).strftime('%Y-%m-%d')})")
-                        bn_period, by_period = await collect_data(symbol, symbol_mapping, period_start, period_end)
+                            bn_data.append({
+                                'fundingTime': funding_time_ms,
+                                'fundingRate': row['binance_rate'],
+                                'interval': row['binance_interval'] * 3600,
+                                'interval_hours': row['binance_interval'],
+                                'datetime': dt_str
+                            })
+                            by_data.append({
+                                'fundingTime': funding_time_ms,
+                                'fundingRate': row['bybit_rate'],
+                                'interval': row['bybit_interval'] * 3600,
+                                'interval_hours': row['bybit_interval'],
+                                'datetime': dt_str
+                            })
                         
-                        if bn_period and by_period:
-                            all_bn_data.extend(bn_period)
-                            all_by_data.extend(by_period)
-                            logger.info(f"[Fetch] {symbol}: fetched {len(bn_period)} Binance, {len(by_period)} Bybit records for {period_type} period")
+                        return bn_data, by_data
+                else:
+                    # Large time range: use cache if it covers the range (with tolerance)
+                    start_time_tolerance_ms = 1 * 24 * 60 * 60 * 1000  # 1 day tolerance
+                    end_time_tolerance_ms = 1 * 24 * 60 * 60 * 1000  # 1 day tolerance
+                    
+                    # Check if cache covers the requested range (with tolerance)
+                    cache_covers_range = (cached_start <= (start_time + start_time_tolerance_ms) and 
+                                         cached_end >= (end_time - end_time_tolerance_ms))
+                    
+                    if cache_covers_range:
+                        logger.info(f"[Cache] {symbol}: using cached data (covers requested range)")
+                        # Convert cached timeline back to data format
+                        bn_data = []
+                        by_data = []
+                        
+                        for _, row in cached_df.iterrows():
+                            dt_str = row['datetime']
+                            funding_time_ms = int(pd.to_datetime(dt_str).timestamp() * 1000)
+                            
+                            bn_data.append({
+                                'fundingTime': funding_time_ms,
+                                'fundingRate': row['binance_rate'],
+                                'interval': row['binance_interval'] * 3600,
+                                'interval_hours': row['binance_interval'],
+                                'datetime': dt_str
+                            })
+                            by_data.append({
+                                'fundingTime': funding_time_ms,
+                                'fundingRate': row['bybit_rate'],
+                                'interval': row['bybit_interval'] * 3600,
+                                'interval_hours': row['bybit_interval'],
+                                'datetime': dt_str
+                            })
+                        
+                        return bn_data, by_data
+                    else:
+                        logger.info(f"[Cache] {symbol}: cache exists but doesn't cover full range, fetching missing periods...")
+                        
+                        # Get symbol mappings for both exchanges
+                        bn_symbol = symbol_mapping.get(symbol, {}).get('binance', symbol)
+                        by_symbol = symbol_mapping.get(symbol, {}).get('bybit', symbol)
+                        
+                        # Use pre-fetched listing times (Ticket #8 optimization: avoid redundant API calls)
+                        bn_listing_time_ms = None
+                        by_listing_time_ms = None
+                        
+                        if listing_times and symbol in listing_times:
+                            bn_listing_time_ms = listing_times[symbol].get('binance')
+                            by_listing_time_ms = listing_times[symbol].get('bybit')
+                            
+                            if bn_listing_time_ms:
+                                bn_dt = datetime.fromtimestamp(bn_listing_time_ms / 1000)
+                                logger.debug(f"[Cache] {symbol}: Binance listing time (cached): {bn_dt}")
+                            
+                            if by_listing_time_ms:
+                                by_dt = datetime.fromtimestamp(by_listing_time_ms / 1000)
+                                logger.debug(f"[Cache] {symbol}: Bybit listing time (cached): {by_dt}")
                         else:
-                            logger.warning(f"[Fetch] {symbol}: insufficient data for {period_type} period")
-                    
-                    # Merge with cached data
-                    for _, row in cached_df.iterrows():
-                        dt_str = row['datetime']
-                        funding_time_ms = int(pd.to_datetime(dt_str).timestamp() * 1000)
+                            logger.debug(f"[Cache] {symbol}: listing times not pre-fetched, skipping listing time check")
                         
-                        all_bn_data.append({
-                            'fundingTime': funding_time_ms,
-                            'fundingRate': row['binance_rate'],
-                            'interval': row['binance_interval'] * 3600,
-                            'interval_hours': row['binance_interval'],
-                            'datetime': dt_str
-                        })
-                        all_by_data.append({
-                            'fundingTime': funding_time_ms,
-                            'fundingRate': row['bybit_rate'],
-                            'interval': row['bybit_interval'] * 3600,
-                            'interval_hours': row['bybit_interval'],
-                            'datetime': dt_str
-                        })
-                    
-                    # Sort by fundingTime
-                    all_bn_data.sort(key=lambda x: x['fundingTime'])
-                    all_by_data.sort(key=lambda x: x['fundingTime'])
-                    
-                    # Save updated data to cache
-                    if all_bn_data and all_by_data:
-                        merged_start = min(
-                            int(pd.to_datetime(all_bn_data[0]['datetime']).timestamp() * 1000),
-                            int(pd.to_datetime(all_by_data[0]['datetime']).timestamp() * 1000)
-                        )
-                        merged_end = max(
-                            int(pd.to_datetime(all_bn_data[-1]['datetime']).timestamp() * 1000),
-                            int(pd.to_datetime(all_by_data[-1]['datetime']).timestamp() * 1000)
-                        )
+                        fetch_periods = []
                         
-                        bn_timeline = analyzer.create_interval_timeline(all_bn_data)
-                        by_timeline = analyzer.create_interval_timeline(all_by_data)
+                        # Gap before cache
+                        if start_time < cached_start:
+                            gap_before_days = (cached_start - start_time) / (24 * 60 * 60 * 1000)
+                            
+                            # Get max listing time for both exchanges
+                            max_listing_time = None
+                            if bn_listing_time_ms and by_listing_time_ms:
+                                max_listing_time = max(bn_listing_time_ms, by_listing_time_ms)
+                            
+                            # Logic:
+                            # 1. If gap_end (cached_start) < max(listing_times) → don't fetch (no data before listing)
+                            # 2. If gap_start (start_time) < max(listing_times) → fetch from max(listing_times)
+                            # 3. Otherwise → fetch from gap_start
+                            
+                            if max_listing_time and cached_start < max_listing_time:
+                                # Gap ends before listing time - no data available
+                                logger.info(f"[Cache] {symbol}: gap before cache ends before listing time ({datetime.fromtimestamp(max_listing_time/1000).strftime('%Y-%m-%d')}), SKIPPING fetch")
+                            else:
+                                # Determine fetch start
+                                fetch_gap_start = start_time
+                                if max_listing_time and start_time < max_listing_time:
+                                    fetch_gap_start = max_listing_time
+                                    logger.info(f"[Cache] {symbol}: gap start before listing time, adjusted fetch start from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(fetch_gap_start/1000).strftime('%Y-%m-%d')}")
+                                
+                                logger.info(f"[Cache] {symbol}: gap before cache ({gap_before_days:.1f} days), fetching from {datetime.fromtimestamp(fetch_gap_start/1000).strftime('%Y-%m-%d')}...")
+                                fetch_periods.append((fetch_gap_start, cached_start, "before"))
                         
-                        funding_timeline = analyzer.create_funding_rate_timeline(bn_timeline, by_timeline, merged_start, merged_end)
+                        # Gap after cache - always fetch
+                        if end_time > cached_end:
+                            gap_after_days = (end_time - cached_end) / (24 * 60 * 60 * 1000)
+                            logger.info(f"[Cache] {symbol}: gap after cache ({gap_after_days:.1f} days), fetching...")
+                            fetch_periods.append((cached_end, end_time, "after"))
                         
-                        if not funding_timeline.empty:
-                            funding_timeline.to_csv(local_csv, index=False)
-                            logger.info(f"[Cache] {symbol}: updated cache with {len(funding_timeline)} records (gaps filled)")
-                    
-                    return all_bn_data, all_by_data
+                        # Fetch missing periods
+                        all_bn_data = []
+                        all_by_data = []
+                        
+                        for period_start, period_end, period_type in fetch_periods:
+                            logger.info(f"[Fetch] {symbol}: fetching {period_type} period ({datetime.fromtimestamp(period_start/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(period_end/1000).strftime('%Y-%m-%d')})")
+                            bn_period, by_period = await collect_data(symbol, symbol_mapping, period_start, period_end)
+                            
+                            if bn_period and by_period:
+                                all_bn_data.extend(bn_period)
+                                all_by_data.extend(by_period)
+                                logger.info(f"[Fetch] {symbol}: fetched {len(bn_period)} Binance, {len(by_period)} Bybit records for {period_type} period")
+                            else:
+                                logger.warning(f"[Fetch] {symbol}: insufficient data for {period_type} period")
+                        
+                        # Merge with cached data
+                        for _, row in cached_df.iterrows():
+                            dt_str = row['datetime']
+                            funding_time_ms = int(pd.to_datetime(dt_str).timestamp() * 1000)
+                            
+                            all_bn_data.append({
+                                'fundingTime': funding_time_ms,
+                                'fundingRate': row['binance_rate'],
+                                'interval': row['binance_interval'] * 3600,
+                                'interval_hours': row['binance_interval'],
+                                'datetime': dt_str
+                            })
+                            all_by_data.append({
+                                'fundingTime': funding_time_ms,
+                                'fundingRate': row['bybit_rate'],
+                                'interval': row['bybit_interval'] * 3600,
+                                'interval_hours': row['bybit_interval'],
+                                'datetime': dt_str
+                            })
+                        
+                        # Sort by fundingTime
+                        all_bn_data.sort(key=lambda x: x['fundingTime'])
+                        all_by_data.sort(key=lambda x: x['fundingTime'])
+                        
+                        # Save updated data to cache
+                        if all_bn_data and all_by_data:
+                            merged_start = min(
+                                int(pd.to_datetime(all_bn_data[0]['datetime']).timestamp() * 1000),
+                                int(pd.to_datetime(all_by_data[0]['datetime']).timestamp() * 1000)
+                            )
+                            merged_end = max(
+                                int(pd.to_datetime(all_bn_data[-1]['datetime']).timestamp() * 1000),
+                                int(pd.to_datetime(all_by_data[-1]['datetime']).timestamp() * 1000)
+                            )
+                            
+                            bn_timeline = analyzer.create_interval_timeline(all_bn_data)
+                            by_timeline = analyzer.create_interval_timeline(all_by_data)
+                            
+                            funding_timeline = analyzer.create_funding_rate_timeline(bn_timeline, by_timeline, merged_start, merged_end)
+                            
+                            if not funding_timeline.empty:
+                                funding_timeline.to_csv(local_csv, index=False)
+                                logger.info(f"[Cache] {symbol}: updated cache with {len(funding_timeline)} records (gaps filled)")
+                        
+                        return all_bn_data, all_by_data
             except Exception as e:
                 logger.warning(f"[Cache] {symbol}: error processing cache ({e}), fetching fresh data...")
     
@@ -1101,14 +1134,6 @@ async def phase3_postprocess(
         mismatches_df.to_csv(DATA_DIR / 'mismatch_events.csv', index=False)
         logger.info(f"[Post-process] Saved {len(all_mismatches)} mismatch events to CSV")
         files_saved += 1
-    
-    # Save interval matrices
-    for symbol, matrix in interval_matrices.items():
-        matrix.to_csv(DATA_DIR / f'interval_matrix_{symbol}.csv', index=False)
-    
-    if interval_matrices:
-        logger.info(f"[Post-process] Saved {len(interval_matrices)} interval matrices")
-        files_saved += len(interval_matrices)
     
     # Save complete funding rate timelines for each symbol
     logger.info("[Post-process] Saving complete funding rate timelines for each symbol...")
