@@ -274,6 +274,12 @@ class KlineFetcher:
             if len(result_df) > 0 and result_df['timestamp'].dtype != 'int64':
                 result_df['timestamp'] = result_df['timestamp'].astype('int64')
             
+            # 確保 OHLCV 欄位都是 float64
+            if len(result_df) > 0:
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    if col in result_df.columns and result_df[col].dtype != 'float64':
+                        result_df[col] = pd.to_numeric(result_df[col], errors='coerce').astype('float64')
+            
             return result_df
         
         # 2. 計算缺失的時間段
@@ -352,6 +358,11 @@ class KlineFetcher:
             # 確保時間戳已標準化為毫秒整數
             combined_df = standardize_timestamp_column(combined_df, col='timestamp')
             
+            # 確保 OHLCV 欄位都是 float64
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                if col in combined_df.columns:
+                    combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce').astype('float64')
+            
             try:
                 cache_path = self._get_cache_path(symbol, exchange)
                 combined_df.to_parquet(cache_path, index=False, compression='snappy')
@@ -368,6 +379,12 @@ class KlineFetcher:
             # 最終驗證時間戳範圍
             if len(result_df) > 0 and not validate_timestamp_range(result_df['timestamp'].values):
                 logger.warning(f"返回的 K 線數據時間戳超出範圍 {symbol}({exchange})")
+            
+            # 確保 OHLCV 欄位都是 float64
+            if len(result_df) > 0:
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    if col in result_df.columns and result_df[col].dtype != 'float64':
+                        result_df[col] = pd.to_numeric(result_df[col], errors='coerce').astype('float64')
             
             return result_df
         
@@ -737,8 +754,8 @@ class KlineFetcher:
             
             wrapped_tasks = [task_with_progress(task) for task in tasks]
             
-            # 執行所有任務
-            results = await asyncio.gather(*wrapped_tasks, return_exceptions=True)
+            # 執行所有任務 (改為 return_exceptions=False 讓異常被 task_with_progress 的 try-except 捕捉)
+            results = await asyncio.gather(*wrapped_tasks, return_exceptions=False)
             pbar.close()
             
             # 整理結果
@@ -752,19 +769,28 @@ class KlineFetcher:
                     none_count += 1
                     continue
                 
-                if len(result) != 3:
-                    logger.warning(f"結果 {i}: 長度不對 {len(result)}")
+                # 檢查是否是異常對象（雖然不應該有，但以防萬一）
+                if isinstance(result, Exception):
+                    logger.error(f"結果 {i}: 異常對象 - {result}")
+                    error_count += 1
+                    continue
+                
+                if not isinstance(result, tuple) or len(result) != 3:
+                    logger.warning(f"結果 {i}: 格式不對，type={type(result)}, len={len(result) if isinstance(result, (list, tuple)) else 'N/A'}")
                     error_count += 1
                     continue
                 
                 symbol, exchange, df = result
                 
+                # 無論 df 是否為 None，都要保持 {symbol: {exchange: df}} 的結構
+                if symbol not in klines_dict:
+                    klines_dict[symbol] = {}
+                
+                klines_dict[symbol][exchange] = df
+                
                 if df is None:
                     none_count += 1
                 else:
-                    if symbol not in klines_dict:
-                        klines_dict[symbol] = {}
-                    klines_dict[symbol][exchange] = df
                     success_count += 1
             
             elapsed = time.time() - start_time

@@ -39,17 +39,53 @@ class VWAPCalculator:
         """
         try:
             # 篩選時間窗口
-            mask = (klines_df['timestamp'] >= start_time) & (klines_df['timestamp'] <= end_time)
+            # 確保所有時間都是毫秒 int64 格式
+            
+            # 轉換 start_time 和 end_time 為毫秒
+            if isinstance(start_time, pd.Timestamp):
+                start_ms = int(start_time.value // 1_000_000)  # 從 nanoseconds 轉為 ms
+            else:
+                start_ms = int(start_time)
+            
+            if isinstance(end_time, pd.Timestamp):
+                end_ms = int(end_time.value // 1_000_000)  # 從 nanoseconds 轉為 ms
+            else:
+                end_ms = int(end_time)
+            
+            # 處理 timestamp 列
+            ts_col = klines_df['timestamp'].copy()
+            
+            # 轉換 timestamp 為毫秒整數
+            if hasattr(ts_col.dtype, 'name') and 'int' in str(ts_col.dtype):
+                # 已經是整數
+                ts_ms = ts_col
+            elif hasattr(ts_col.dtype, 'name') and 'datetime' in str(ts_col.dtype):
+                # Pandas datetime64 - 轉為毫秒整數
+                ts_ms = (ts_col.astype('int64') // 1_000_000).astype('int64')
+            else:
+                # 其他型態 - 嘗試轉換
+                ts_ms = (pd.to_datetime(ts_col).astype('int64') // 1_000_000).astype('int64')
+            
+            mask = (ts_ms >= start_ms) & (ts_ms <= end_ms)
             window_data = klines_df[mask].copy()
             
             if len(window_data) < min_required_candles:
                 logger.debug(
                     f"資料不足: {len(window_data)} < {min_required_candles} "
-                    f"({start_time} ~ {end_time})"
+                    f"({start_ms} ~ {end_ms})"
                 )
                 return None
             
             # 計算典型價格
+            # 確保 OHLCV 欄位都是數字型態
+            for col in ['high', 'low', 'close', 'volume']:
+                if col not in window_data.columns:
+                    logger.error(f"缺少欄位: {col}")
+                    return None
+                if window_data[col].dtype == 'object':
+                    logger.warning(f"欄位 {col} 是字符串，轉換為 float64")
+                    window_data[col] = pd.to_numeric(window_data[col], errors='coerce')
+            
             window_data['typical_price'] = (
                 (window_data['high'] + window_data['low'] + window_data['close']) / 3
             )
@@ -111,15 +147,26 @@ class VWAPCalculator:
             
             # 對每個交易所計算 VWAP
             for exchange in ['binance', 'bybit']:
-                if exchange not in klines_dict or klines_dict[exchange] is None:
-                    logger.warning(f"缺少 {exchange} 的 K 線資料")
+                if exchange not in klines_dict:
+                    logger.debug(f"缺少 {exchange} 的 K 線資料 (klines_dict 鍵: {list(klines_dict.keys())})")
                     return None, None, None, None, False
                 
                 klines = klines_dict[exchange]
                 
-                # 確保 timestamp 列是 Timestamp 型態
-                if not isinstance(klines['timestamp'].dtype, type(pd.Timestamp)):
-                    klines['timestamp'] = pd.to_datetime(klines['timestamp'])
+                # 檢查數據是否為 None 或空
+                if klines is None or len(klines) == 0:
+                    logger.debug(f"{exchange} 的 K 線資料為空")
+                    return None, None, None, None, False
+                
+                # 確保 timestamp 列是毫秒整數格式
+                # 如果已經是 int64，就保持原樣；如果是 datetime，就轉為毫秒整數
+                ts_dtype_str = str(klines['timestamp'].dtype)
+                if 'datetime' in ts_dtype_str:
+                    # 是 datetime 格式 - 轉為毫秒整數
+                    klines['timestamp'] = (klines['timestamp'].astype('int64') // 1_000_000).astype('int64')
+                elif ts_dtype_str != 'int64':
+                    # 其他格式 - 先轉為 datetime 再轉為毫秒整數
+                    klines['timestamp'] = (pd.to_datetime(klines['timestamp']).astype('int64') // 1_000_000).astype('int64')
                 
                 # 計算入場 VWAP
                 entry_vwap = VWAPCalculator.calculate_vwap(

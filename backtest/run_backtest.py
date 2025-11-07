@@ -11,6 +11,12 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
+# 確保可以導入 backtest 模塊
+# run_backtest.py 路徑: /home/james/research/funding_interval_arb/backtest/run_backtest.py
+# 需要的根目錄: /home/james/research/funding_interval_arb
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 from backtest.backtest_config import BacktestConfig
 from backtest.opportunity_loader import OpportunityLoader
 from backtest.vwap_calculator import VWAPCalculator
@@ -189,6 +195,13 @@ def run_complete_backtest(config: BacktestConfig, logger: logging.Logger):
                 if symbol in klines_dict:
                     return klines_dict[symbol]  # 直接返回 {exchange: df}
                 return {}
+            
+            # 檢查機會中的 symbols 是否在 klines_dict 中
+            opportunity_symbols = set(opp.get('symbol') for opp in opportunities_dicts if 'symbol' in opp)
+            missing_symbols = opportunity_symbols - set(klines_dict.keys())
+            if missing_symbols:
+                logger.warning(f"⚠️  {len(missing_symbols)} 個機會的 symbols 在 klines_dict 中找不到")
+                logger.warning(f"   缺失 symbols: {missing_symbols}")
             
             updated_opps, stats = VWAPIntegrator.calculate_vwaps_for_all_opportunities(
                 opportunities_dicts,
