@@ -1,0 +1,33 @@
+{
+  "analysis": {
+    "run_analysis_first": false,
+    "start_date": "2025-01-01",
+    "end_date": "2025-11-05"
+  },
+  
+  "trading": {
+    "initial_capital": 100000,
+    "vwap_window_minutes": 5,
+    "entry_buffer_pct": 0.0005,
+    "exit_buffer_pct": 0.0005
+  },
+
+  "fees": {
+    "maker_fee": 0.0002,
+    "taker_fee": 0.0004
+  },
+
+  "symbols": {
+    "include_all": true,
+    "symbol_whitelist": [],
+    "exclude_symbols": []
+  },
+
+  "output": {
+    "output_dir": "/home/james/research_output/funding_interval_arb/backtest_results",
+    "save_detailed_trades": true,
+    "save_equity_curve": true,
+    "generate_plots": true
+  }
+}
+
